@@ -1,0 +1,215 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Workspace {
+  id           String   @id @default(cuid())
+  name         String
+  slug         String   @unique
+  deliveryMode String   @default("simulation") // simulation | extension | api
+  createdAt    DateTime @default(now())
+
+  members       Membership[]
+  accounts      LinkedinAccount[]
+  leads         Lead[]
+  lists         List[]
+  campaigns     Campaign[]
+  conversations Conversation[]
+  activityLogs  ActivityLog[]
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  memberships Membership[]
+}
+
+model Membership {
+  id          String    @id @default(cuid())
+  userId      String
+  workspaceId String
+  role        String    @default("member") // owner | admin | member
+  createdAt   DateTime  @default(now())
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workspaceId])
+}
+
+// A connected LinkedIn profile ("avatar") that runs campaigns.
+model LinkedinAccount {
+  id           String    @id @default(cuid())
+  workspaceId  String
+  name         String
+  headline     String?
+  profileUrl   String?
+  avatarUrl    String?
+  status       String    @default("active") // active | paused
+  dailyLimit   Int       @default(50)
+  createdAt    DateTime  @default(now())
+
+  workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  campaigns     Campaign[]
+  conversations Conversation[]
+
+  @@index([workspaceId])
+}
+
+model Lead {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  name         String
+  headline     String?
+  company      String?
+  linkedinUrl  String?
+  location     String?
+  email        String?
+  phone        String?
+  notes        String?
+  source       String   @default("manual") // manual | csv | event | import
+  status       String   @default("new") // new | contacted | replied | booked | negative
+  tags         Json?    @default("[]")
+  listId       String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  workspace        Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  list             List?             @relation(fields: [listId], references: [id], onDelete: SetNull)
+  campaignMembers  CampaignMember[]
+  conversations    Conversation[]
+
+  @@index([workspaceId])
+  @@index([status])
+}
+
+model List {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  color       String   @default("#4f46e5")
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  leads     Lead[]
+
+  @@index([workspaceId])
+}
+
+model Campaign {
+  id               String    @id @default(cuid())
+  workspaceId      String
+  name             String
+  type             String    @default("outbound") // outbound | inbound
+  kind             String    @default("connections") // connections | messages | reactions
+  status           String    @default("draft") // draft | running | paused | finished
+  linkedinAccountId String?
+  dailyLimit       Int       @default(30)
+  minDelayMin      Int       @default(3)
+  maxDelayMin      Int       @default(8)
+  smartTimezone    Boolean   @default(true)
+  autoTranslate    Boolean   @default(false)
+  aiPersonalization Boolean  @default(true)
+  startDate        DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  workspace      Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account        LinkedinAccount? @relation(fields: [linkedinAccountId], references: [id], onDelete: SetNull)
+  steps          CampaignStep[]
+  members        CampaignMember[]
+
+  @@index([workspaceId])
+}
+
+model CampaignStep {
+  id          String   @id @default(cuid())
+  campaignId  String
+  position    Int
+  action      String   // connect | message | follow_up | reaction
+  daysAfter   Int      @default(0)
+  template    String?
+  variables   Json?    @default("[]") // [{ name, value }]
+  attachments Json?    @default("[]")
+  updatedAt   DateTime @updatedAt
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId])
+}
+
+model CampaignMember {
+  id         String    @id @default(cuid())
+  campaignId String
+  leadId     String
+  status     String    @default("queued") // queued | sent | accepted | replied | booked | negative | skipped
+  stepIndex  Int       @default(0)
+  nextRunAt  DateTime?
+  sentAt     DateTime?
+  acceptedAt DateTime?
+  repliedAt  DateTime?
+  bookedAt   DateTime?
+  createdAt  DateTime  @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  lead     Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, leadId])
+  @@index([campaignId, status])
+}
+
+// The unified inbox — one conversation per lead.
+model Conversation {
+  id                String    @id @default(cuid())
+  workspaceId       String
+  linkedinAccountId String?
+  leadId            String
+  lastMessageAt     DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  workspace       Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account         LinkedinAccount? @relation(fields: [linkedinAccountId], references: [id], onDelete: SetNull)
+  lead            Lead            @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  messages        Message[]
+
+  @@index([workspaceId])
+  @@index([leadId])
+}
+
+model Message {
+  id             String    @id @default(cuid())
+  conversationId String
+  direction      String    // out | in
+  body           String
+  status         String    @default("sent") // draft | queued | sent | failed
+  sentAt         DateTime?
+  createdAt      DateTime  @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+}
+
+model ActivityLog {
+  id          String    @id @default(cuid())
+  workspaceId String
+  campaignId  String?
+  type        String    // sent | accepted | replied | booked | imported | note
+  message     String?
+  meta        Json?  @default("[]")
+  createdAt   DateTime  @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+}
