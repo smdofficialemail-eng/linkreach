@@ -8,11 +8,14 @@ datasource db {
 }
 
 model Workspace {
-  id           String   @id @default(cuid())
-  name         String
-  slug         String   @unique
-  deliveryMode String   @default("simulation") // simulation | extension | api
-  createdAt    DateTime @default(now())
+  id             String   @id @default(cuid())
+  name           String
+  slug           String   @unique
+  deliveryMode   String   @default("simulation") // simulation | extension | api
+  extensionCode  String?  @unique // pairing code for the browser extension
+  extensionName  String?  // label of the paired browser, once connected
+  extensionPairedAt DateTime?
+  createdAt      DateTime @default(now())
 
   members       Membership[]
   accounts      LinkedinAccount[]
@@ -21,6 +24,27 @@ model Workspace {
   campaigns     Campaign[]
   conversations Conversation[]
   activityLogs  ActivityLog[]
+  extensionJobs ExtensionJob[]
+}
+
+// A job queued for the paired browser extension to execute on LinkedIn.
+model ExtensionJob {
+  id          String    @id @default(cuid())
+  workspaceId String
+  campaignId  String?
+  memberId    String? // CampaignMember id this job advances
+  leadId      String
+  action      String    // connect | message | follow_up | reaction
+  payload     Json?     @default("{}")
+  status      String    @default("queued") // queued | in_progress | done | failed
+  error       String?
+  claimedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, status])
 }
 
 model User {
@@ -48,15 +72,29 @@ model Membership {
 
 // A connected LinkedIn profile ("avatar") that runs campaigns.
 model LinkedinAccount {
-  id           String    @id @default(cuid())
-  workspaceId  String
-  name         String
-  headline     String?
-  profileUrl   String?
-  avatarUrl    String?
-  status       String    @default("active") // active | paused
-  dailyLimit   Int       @default(50)
-  createdAt    DateTime  @default(now())
+  id              String    @id @default(cuid())
+  workspaceId     String
+  name            String
+  headline        String?
+  profileUrl      String?
+  avatarUrl       String?
+  email           String?   // from LinkedIn OAuth
+  linkedinId      String?   @unique // LinkedIn's unique member ID (sub from OIDC)
+  accessToken     String?   // OAuth access token
+  refreshToken    String?   // OAuth refresh token
+  tokenExpiry     DateTime? // when the access token expires
+  // Server-side login credentials (encrypted at rest)
+  linkedinLogin   String?   // LinkedIn login email (for server-side auth)
+  passwordEnc     String?   // AES-256-GCM encrypted LinkedIn password
+  sessionStatus   String    @default("idle") // idle | logging_in | logged_in | session_expired | banned
+  lastSessionAt   DateTime? // when the headless session was last active
+  warmupDay       Int       @default(0)  // day 0-14 of warm-up (0 = not started)
+  warmupStartedAt DateTime?
+  sentToday       Int       @default(0)  // actions sent today
+  sentTodayDate   String?   // date of sentToday (YYYY-MM-DD)
+  status          String    @default("active") // active | paused
+  dailyLimit      Int       @default(15) // conservative default for server-side
+  createdAt       DateTime  @default(now())
 
   workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   campaigns     Campaign[]

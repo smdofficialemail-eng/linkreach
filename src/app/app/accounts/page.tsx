@@ -1,16 +1,26 @@
 import { prisma } from "@/lib/db";
 import { requireWorkspace } from "@/lib/app";
 import { createAccount, toggleAccount, deleteAccount } from "./actions";
+import { LinkedInConnectButton } from "./linkedin-button";
+import { LinkedInCredentialForm } from "./credential-form";
 
 export const metadata = { title: "Accounts — LinkReach" };
 
-export default async function AccountsPage() {
+export default async function AccountsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ linkedin_error?: string; linkedin?: string }>;
+}) {
   const { workspace } = await requireWorkspace();
+  const params = await searchParams;
   const accounts = await prisma.linkedinAccount.findMany({
     where: { workspaceId: workspace.id },
     orderBy: { createdAt: "asc" },
     include: { _count: { select: { campaigns: true, conversations: true } } },
   });
+
+  const error = params.linkedin_error;
+  const success = params.linkedin;
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -22,17 +32,47 @@ export default async function AccountsPage() {
         </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      {/* LinkedIn OAuth banner */}
+      {success === "connected" && (
+        <div className="mb-4 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-5 py-3 text-sm text-emerald-300">
+          ✓ LinkedIn account connected successfully! Your profile info has been imported.
+        </div>
+      )}
+      {error && (
+        <div className="mb-4 rounded-xl border border-red-500/20 bg-red-500/10 px-5 py-3 text-sm text-red-300">
+          {error === "access_denied"
+            ? "LinkedIn access was denied. Please try again."
+            : error === "already_linked_other_workspace"
+              ? "This LinkedIn account is already connected to another workspace."
+              : `LinkedIn connection failed: ${error.replace(/_/g, " ")}`}
+        </div>
+      )}
+
+      <LinkedInConnectButton />
+
+      {/* Existing accounts */}
+      <div className="mt-6 grid gap-4 sm:grid-cols-2">
         {accounts.map((a) => (
           <div key={a.id} className="card p-5 shadow-card">
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-3">
-                <span className="grid size-11 place-items-center rounded-xl bg-gradient-to-br from-ink-600 to-ink-700 text-lg font-extrabold text-slate-200">
-                  {a.name.charAt(0)}
-                </span>
+                {a.avatarUrl ? (
+                  <img
+                    src={a.avatarUrl}
+                    alt={a.name}
+                    className="size-11 rounded-xl object-cover"
+                  />
+                ) : (
+                  <span className="grid size-11 place-items-center rounded-xl bg-gradient-to-br from-ink-600 to-ink-700 text-lg font-extrabold text-slate-200">
+                    {a.name.charAt(0)}
+                  </span>
+                )}
                 <div>
                   <p className="font-extrabold text-white">{a.name}</p>
                   <p className="text-xs text-slate-500">{a.headline ?? "—"}</p>
+                  {a.email && (
+                    <p className="text-xs text-slate-500">{a.email}</p>
+                  )}
                 </div>
               </div>
               <span className={`chip ${a.status === "active" ? "bg-emerald-500/15 text-emerald-300" : "bg-slate-500/15 text-slate-400"}`}>
@@ -42,6 +82,9 @@ export default async function AccountsPage() {
             <div className="mt-4 flex items-center justify-between">
               <p className="text-xs text-slate-500">
                 {a._count.campaigns} campaigns · {a._count.conversations} conversations · limit {a.dailyLimit}/day
+                {a.linkedinId && (
+                  <span className="ml-2 text-emerald-400">● OAuth connected</span>
+                )}
               </p>
               <div className="flex gap-2">
                 <form action={toggleAccount.bind(null, a.id)}>
@@ -56,13 +99,18 @@ export default async function AccountsPage() {
                 </form>
               </div>
             </div>
+            <LinkedInCredentialForm
+              accountId={a.id}
+              accountName={a.name}
+              hasCredentials={!!a.linkedinLogin && !!a.passwordEnc}
+            />
           </div>
         ))}
       </div>
 
-      {/* Connect form */}
+      {/* Manual connect form (fallback) */}
       <form action={createAccount} className="card mt-6 space-y-4 p-6 shadow-card">
-        <h2 className="text-sm font-extrabold uppercase tracking-wider text-slate-400">Connect a profile</h2>
+        <h2 className="text-sm font-extrabold uppercase tracking-wider text-slate-400">Connect a profile manually</h2>
         <div className="grid gap-4 sm:grid-cols-3">
           <div>
             <label className="label">Profile name *</label>

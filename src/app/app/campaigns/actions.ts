@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { requireWorkspace } from "@/lib/app";
+import { resolveTemplate } from "@/lib/extension";
 
 const stepSchema = z.object({
   action: z.enum(["connect", "message", "follow_up", "reaction"]),
@@ -138,29 +139,63 @@ export async function startCampaign(campaignId: string) {
   const { workspace } = await requireWorkspace();
   const campaign = await prisma.campaign.findFirst({
     where: { id: campaignId, workspaceId: workspace.id },
-    include: { members: true },
+    include: { members: true, steps: { orderBy: { position: "asc" } } },
   });
   if (!campaign) return;
 
-  // Simulation: launching the campaign sends the first step to every queued member.
-  const now = new Date();
   await prisma.campaign.update({
     where: { id: campaignId },
     data: { status: "running" },
   });
-  await prisma.campaignMember.updateMany({
-    where: { campaignId, status: "queued" },
-    data: { status: "sent", sentAt: now, nextRunAt: new Date(now.getTime() + 24 * 3600 * 1000) },
-  });
 
-  await prisma.activityLog.create({
-    data: {
-      workspaceId: workspace.id,
-      campaignId,
-      type: "sent",
-      message: `Campaign "${campaign.name}" launched — first step sent to ${campaign.members.length} leads`,
-    },
-  });
+  if (workspace.deliveryMode === "extension" || workspace.deliveryMode === "server") {
+    // Extension/Server mode: queue a job for the first step of every queued member.
+    // The browser extension or the worker service polls and executes on LinkedIn.
+    const firstStep = campaign.steps[0];
+    if (firstStep) {
+      const queued = campaign.members.filter((m) => m.status === "queued");
+      const leads = await prisma.lead.findMany({
+        where: { id: { in: queued.map((m) => m.leadId) } },
+      });
+      const leadMap = new Map(leads.map((l) => [l.id, l]));
+      const jobs = queued.map((m) => {
+        const lead = leadMap.get(m.leadId);
+        const template = resolveTemplate(firstStep.template, lead ?? {});
+        return {
+          workspaceId: workspace.id,
+          campaignId,
+          memberId: m.id,
+          leadId: m.leadId,
+          action: firstStep.action,
+          payload: { template, note: template },
+        };
+      });
+      await prisma.extensionJob.createMany({ data: jobs });
+    }
+    await prisma.activityLog.create({
+      data: {
+        workspaceId: workspace.id,
+        campaignId,
+        type: "note",
+        message: `Campaign "${campaign.name}" launched — ${campaign.members.length} job${campaign.members.length === 1 ? "" : "s"} queued for your browser extension`,
+      },
+    });
+  } else {
+    // Simulation: launching the campaign sends the first step to every queued member.
+    const now = new Date();
+    await prisma.campaignMember.updateMany({
+      where: { campaignId, status: "queued" },
+      data: { status: "sent", sentAt: now, nextRunAt: new Date(now.getTime() + 24 * 3600 * 1000) },
+    });
+    await prisma.activityLog.create({
+      data: {
+        workspaceId: workspace.id,
+        campaignId,
+        type: "sent",
+        message: `Campaign "${campaign.name}" launched — first step sent to ${campaign.members.length} leads`,
+      },
+    });
+  }
 
   revalidatePath(`/app/campaigns/${campaignId}`);
 }

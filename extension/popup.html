@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LinkReach</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        width: 320px;
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        background: #0b1120;
+        color: #e2e8f0;
+      }
+      .header {
+        display: flex; align-items: center; gap: 10px;
+        padding: 14px 16px;
+        border-bottom: 1px solid rgba(255,255,255,.08);
+        background: #0f172a;
+      }
+      .logo {
+        width: 34px; height: 34px; border-radius: 9px;
+        background: linear-gradient(135deg, #4f46e5, #7c3aed);
+        display: grid; place-items: center;
+        font-weight: 900; font-size: 15px; color: #fff;
+      }
+      .header h1 { font-size: 15px; font-weight: 800; }
+      .header p { font-size: 11px; color: #94a3b8; }
+      .body { padding: 16px; }
+      .badge {
+        display: inline-flex; align-items: center; gap: 6px;
+        font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 999px;
+      }
+      .badge.ok { background: rgba(16,185,129,.15); color: #6ee7b7; }
+      .badge.wait { background: rgba(245,158,11,.15); color: #fcd34d; }
+      .badge.off { background: rgba(148,163,184,.12); color: #94a3b8; }
+      label { display: block; font-size: 11px; font-weight: 700; color: #94a3b8; margin: 12px 0 5px; }
+      input {
+        width: 100%; padding: 9px 11px;
+        background: #0f172a; border: 1px solid rgba(255,255,255,.12);
+        border-radius: 8px; color: #fff; font-size: 13px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        letter-spacing: 0.12em;
+      }
+      input:focus { outline: 2px solid #4f46e5; border-color: transparent; }
+      .btn {
+        width: 100%; margin-top: 14px; padding: 10px;
+        border: 0; border-radius: 8px; cursor: pointer;
+        background: #4f46e5; color: #fff;
+        font-size: 13px; font-weight: 800;
+      }
+      .btn:hover { background: #4338ca; }
+      .btn.ghost { background: transparent; border: 1px solid rgba(255,255,255,.15); color: #cbd5e1; }
+      .btn.ghost:hover { background: rgba(255,255,255,.06); }
+      .status { margin-top: 12px; font-size: 12px; line-height: 1.5; color: #94a3b8; }
+      .status.err { color: #fca5a5; }
+      .status.ok { color: #6ee7b7; }
+      .meta { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.07); font-size: 11px; color: #64748b; }
+      .meta b { color: #94a3b8; font-weight: 700; }
+      .hint { font-size: 11px; color: #64748b; margin-top: 4px; line-height: 1.5; }
+      .hidden { display: none; }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <div class="logo">L</div>
+      <div>
+        <h1>LinkReach</h1>
+        <p>LinkedIn outreach executor</p>
+      </div>
+      <span id="stateBadge" class="badge off" style="margin-left:auto">Not paired</span>
+    </div>
+
+    <div class="body">
+      <div id="pairSection">
+        <label for="baseUrl">App URL</label>
+        <input id="baseUrl" placeholder="http://127.0.0.1:3001" />
+        <div class="hint">Your LinkReach app — localhost for testing, or your Vercel URL in production.</div>
+
+        <label for="code">Pairing code</label>
+        <input id="code" placeholder="ABCD2345" maxlength="8" />
+        <div class="hint">Generate a code in LinkReach → Settings → Browser extension.</div>
+
+        <button id="pairBtn" class="btn">Pair with LinkReach</button>
+        <div id="pairStatus" class="status"></div>
+      </div>
+
+      <div id="pairedSection" class="hidden">
+        <span id="pairedBadge" class="badge ok">✓ Paired</span>
+        <p id="workspaceName" class="status ok"></p>
+
+        <div style="display:flex;align-items:center;gap:12px;margin-top:10px">
+          <div style="background:#1e293b;border-radius:10px;padding:8px 14px;text-align:center">
+            <div style="font-size:11px;color:#64748b;font-weight:700">SENT TODAY</div>
+            <div id="dailyCount" style="font-size:22px;font-weight:900;color:#a5b4fc;margin-top:2px">0</div>
+          </div>
+          <div style="font-size:11px;color:#64748b;line-height:1.5">
+            Daily safety limit: <b style="color:#94a3b8">40</b><br/>
+            Resets at midnight.
+          </div>
+        </div>
+
+        <button id="unpairBtn" class="btn ghost">Unpair</button>
+        <div class="meta">
+          <b>How it works:</b> the extension polls your app for campaign jobs
+          every ~20s and executes them on LinkedIn in a background tab,
+          human-speed. Keep this extension installed and your Chrome logged
+          into LinkedIn.
+        </div>
+      </div>
+    </div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
