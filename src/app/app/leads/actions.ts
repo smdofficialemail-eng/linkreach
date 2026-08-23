@@ -142,3 +142,12 @@ export async function updateLeadStatus(leadId: string, status: string) {
   });
   revalidatePath("/app/leads");
 }
+
+export async function updateLeadTags(leadId: string, tags: string[]) {
+  const { workspace } = await requireWorkspace();
+  await prisma.lead.updateMany({
+    where: { id: leadId, workspaceId: workspace.id },
+    data: { tags },
+  });
+  revalidatePath("/app/leads");
+}
