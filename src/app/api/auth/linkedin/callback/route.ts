@@ -67,13 +67,8 @@ export async function GET(req: NextRequest) {
     const expiresIn = tokenData.expires_in as number; // seconds
     const tokenExpiry = new Date(Date.now() + expiresIn * 1000);
 
-    // Fetch user profile via LinkedIn REST API v2.
-    const profileRes = await fetch("https://api.linkedin.com/v2/me?projection=(id,firstName,lastName,profilePicture(displayImage~:playableStreams))", {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-
-    // Fetch email separately (requires r_emailaddress scope).
-    const emailRes = await fetch("https://api.linkedin.com/v2/emailAddress?q=members&projection=(elements*(handle~))", {
+    // Fetch user profile via OpenID Connect userinfo endpoint.
+    const profileRes = await fetch("https://api.linkedin.com/v2/userinfo", {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
 
@@ -85,26 +80,13 @@ export async function GET(req: NextRequest) {
 
     if (profileRes.ok) {
       const profile = await profileRes.json();
-      linkedinId = profile.id || "";
-      const first = profile.firstName || "";
-      const last = profile.lastName || "";
-      fullName = `${first} ${last}`.trim() || "LinkedIn User";
-      // Extract profile picture URL if available.
-      try {
-        const elements = profile.profilePicture?.["displayImage~"]?.elements || [];
-        const bestPic = elements.find((e: any) => e.width >= 100) || elements[0];
-        picture = bestPic?.identifiers?.[0]?.identifier || null;
-      } catch { /* no picture */ }
+      // OpenID Connect userinfo returns: sub, name, given_name, family_name, picture, email
+      linkedinId = profile.sub || "";
+      fullName = profile.name || `${profile.given_name || ""} ${profile.family_name || ""}`.trim() || "LinkedIn User";
+      email = profile.email || null;
+      picture = profile.picture || null;
     } else {
       console.error("[LinkedIn OAuth] Profile fetch failed:", profileRes.status);
-    }
-
-    if (emailRes.ok) {
-      const emailData = await emailRes.json();
-      const elements = emailData.elements || [];
-      if (elements.length > 0) {
-        email = elements[0]["handle~"]?.emailAddress || null;
-      }
     }
 
     // Find the workspace for the current user.

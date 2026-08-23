@@ -20,10 +20,8 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // Use r_liteprofile + r_emailaddress (available by default on all LinkedIn apps).
-  // If the app has "Sign In with LinkedIn using OpenID Connect" enabled, you can
-  // switch to ["openid", "profile", "email"] for richer profile data.
-  const scopes = ["r_liteprofile", "r_emailaddress"].join(" ");
+  // OpenID Connect scopes (requires "Sign In with LinkedIn using OpenID Connect" product).
+  const scopes = ["openid", "profile", "email"].join(" ");
 
   // State parameter — random CSRF token, stored in a cookie.
   const state = crypto.randomUUID();
