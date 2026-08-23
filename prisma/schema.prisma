@@ -92,6 +92,7 @@ model LinkedinAccount {
   accessToken     String?   // OAuth access token
   refreshToken    String?   // OAuth refresh token
   tokenExpiry     DateTime? // when the access token expires
+  liAt            String?   // LinkedIn session cookie (li_at) for Voyager API access
   // Server-side login credentials (encrypted at rest)
   linkedinLogin   String?   // LinkedIn login email (for server-side auth)
   passwordEnc     String?   // AES-256-GCM encrypted LinkedIn password

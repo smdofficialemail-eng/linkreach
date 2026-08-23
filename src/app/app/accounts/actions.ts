@@ -87,3 +87,39 @@ export async function saveLinkedinCredentials(
   revalidatePath("/app/accounts");
   return { ok: true };
 }
+
+/**
+ * Save LinkedIn session cookie (li_at) for Voyager API access.
+ * This enables real LinkedIn profile search.
+ */
+export async function saveSessionCookie(accountId: string, liAt: string) {
+  const { workspace } = await requireWorkspace();
+  const account = await prisma.linkedinAccount.findFirst({
+    where: { id: accountId, workspaceId: workspace.id },
+  });
+  if (!account) return { error: "Account not found" };
+
+  // Basic validation — li_at cookies are long base64 strings
+  if (liAt.length < 50) {
+    return { error: "Invalid session cookie. Make sure you copied the full li_at value." };
+  }
+
+  // Encrypt the cookie before storage
+  const encrypted = encrypt(liAt);
+
+  await prisma.linkedinAccount.update({
+    where: { id: accountId },
+    data: { liAt: encrypted },
+  });
+
+  await prisma.activityLog.create({
+    data: {
+      workspaceId: workspace.id,
+      type: "note",
+      message: `LinkedIn session cookie saved for "${account.name}" — real search enabled`,
+    },
+  });
+
+  revalidatePath("/app/accounts");
+  return { ok: true };
+}

@@ -3,6 +3,7 @@ import { requireWorkspace } from "@/lib/app";
 import { createAccount, toggleAccount, deleteAccount } from "./actions";
 import { LinkedInConnectButton } from "./linkedin-button";
 import { LinkedInCredentialForm } from "./credential-form";
+import { SessionCookieForm } from "./session-cookie-form";
 
 export const metadata = { title: "Accounts — LinkReach" };
 
@@ -113,6 +114,11 @@ export default async function AccountsPage({
               accountId={a.id}
               accountName={a.name}
               hasCredentials={!!a.linkedinLogin && !!a.passwordEnc}
+            />
+            <SessionCookieForm
+              accountId={a.id}
+              accountName={a.name}
+              hasCookie={!!a.liAt}
             />
           </div>
         ))}

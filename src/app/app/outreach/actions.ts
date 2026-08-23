@@ -28,7 +28,13 @@ export async function searchProfilesAction(
   }>;
   total: number;
 }> {
-  const provider = getLinkedInProvider();
+  // Try to get a LinkedIn account with a session cookie for real search
+  const account = await prisma.linkedinAccount.findFirst({
+    where: { workspaceId, liAt: { not: null } },
+    orderBy: { createdAt: "desc" },
+  });
+  const liAt = account?.liAt || undefined;
+  const provider = getLinkedInProvider(account?.status || undefined, liAt);
   const result = await provider.searchProfiles(query);
   console.log("[Outreach] searchProfiles returned:", result.profiles.length, "profiles");
 

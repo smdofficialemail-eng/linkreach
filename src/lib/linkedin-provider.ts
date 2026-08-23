@@ -131,9 +131,23 @@ export interface LinkedInProvider {
 }
 
 /**
- * Factory to get the active LinkedIn provider based on env config.
+ * Factory to get the active LinkedIn provider.
+ *
+ * @param deliveryMode - If "server" and a liAt cookie is provided, uses Voyager API
+ * @param liAt - Optional LinkedIn session cookie for real API access
  */
-export function getLinkedInProvider(): LinkedInProvider {
+export function getLinkedInProvider(deliveryMode?: string, liAt?: string): LinkedInProvider {
+  // If we have a session cookie, use the Voyager API for real LinkedIn search
+  if (liAt && deliveryMode !== "simulation") {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { VoyagerLinkedInProvider } = require("./voyager-linkedin-provider");
+      return new VoyagerLinkedInProvider(liAt);
+    } catch {
+      // Fall through to mock if Voyager provider fails to load
+    }
+  }
+
   const provider = process.env.LINKEDIN_PROVIDER ?? "mock";
 
   // Dynamic import to avoid bundling mock data in production
