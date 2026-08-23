@@ -48,20 +48,37 @@ export async function searchProfilesAction(
     console.error("[Outreach] Failed to get access token:", e);
   }
 
+  // Try real search first, fall back to mock if it fails
   let provider;
+  let usedMock = false;
   try {
     provider = getLinkedInProvider(accessToken);
   } catch (e) {
     console.error("[Outreach] Failed to create provider:", e);
-    return { profiles: [], total: 0, error: "Failed to initialize search provider." };
+    // Fall back to mock
+    provider = getLinkedInProvider();
+    usedMock = true;
   }
 
   let result;
   try {
     result = await provider.searchProfiles(query);
   } catch (e) {
-    console.error("[Outreach] Search failed:", e);
-    return { profiles: [], total: 0, error: `Search failed: ${e instanceof Error ? e.message : "Unknown error"}` };
+    console.error("[Outreach] Real search failed:", e);
+    if (!usedMock && accessToken) {
+      // Token expired or invalid — fall back to mock provider
+      console.log("[Outreach] Falling back to mock provider");
+      try {
+        const mockProvider = getLinkedInProvider();
+        result = await mockProvider.searchProfiles(query);
+        usedMock = true;
+      } catch (e2) {
+        console.error("[Outreach] Mock fallback also failed:", e2);
+        return { profiles: [], total: 0, error: `Search failed: ${e instanceof Error ? e.message : "Unknown error"}` };
+      }
+    } else {
+      return { profiles: [], total: 0, error: `Search failed: ${e instanceof Error ? e.message : "Unknown error"}` };
+    }
   }
 
   console.log("[Outreach] searchProfiles returned:", result.profiles.length, "profiles");
