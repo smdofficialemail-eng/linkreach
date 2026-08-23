@@ -67,20 +67,45 @@ export async function GET(req: NextRequest) {
     const expiresIn = tokenData.expires_in as number; // seconds
     const tokenExpiry = new Date(Date.now() + expiresIn * 1000);
 
-    // Fetch user profile via OpenID Connect userinfo endpoint.
-    const profileRes = await fetch("https://api.linkedin.com/v2/userinfo", {
+    // Fetch user profile via LinkedIn REST API v2.
+    const profileRes = await fetch("https://api.linkedin.com/v2/me?projection=(id,firstName,lastName,profilePicture(displayImage~:playableStreams))", {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
 
-    if (!profileRes.ok) {
+    // Fetch email separately (requires r_emailaddress scope).
+    const emailRes = await fetch("https://api.linkedin.com/v2/emailAddress?q=members&projection=(elements*(handle~))", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    let linkedinId = "";
+    let fullName = "LinkedIn User";
+    let picture: string | null = null;
+    let headline: string | null = null;
+    let email: string | null = null;
+
+    if (profileRes.ok) {
+      const profile = await profileRes.json();
+      linkedinId = profile.id || "";
+      const first = profile.firstName || "";
+      const last = profile.lastName || "";
+      fullName = `${first} ${last}`.trim() || "LinkedIn User";
+      // Extract profile picture URL if available.
+      try {
+        const elements = profile.profilePicture?.["displayImage~"]?.elements || [];
+        const bestPic = elements.find((e: any) => e.width >= 100) || elements[0];
+        picture = bestPic?.identifiers?.[0]?.identifier || null;
+      } catch { /* no picture */ }
+    } else {
       console.error("[LinkedIn OAuth] Profile fetch failed:", profileRes.status);
-      return NextResponse.redirect(
-        new URL("/app/accounts?linkedin_error=profile_fetch_failed", req.url)
-      );
     }
 
-    const profile = await profileRes.json();
-    // OpenID Connect userinfo returns: sub, name, given_name, family_name, picture, email, email_verified
+    if (emailRes.ok) {
+      const emailData = await emailRes.json();
+      const elements = emailData.elements || [];
+      if (elements.length > 0) {
+        email = elements[0]["handle~"]?.emailAddress || null;
+      }
+    }
 
     // Find the workspace for the current user.
     const session = await getSession();
@@ -97,11 +122,6 @@ export async function GET(req: NextRequest) {
     }
 
     const workspaceId = membership.workspaceId;
-    const linkedinId = profile.sub as string;
-    const fullName = profile.name as string || `${profile.given_name || ""} ${profile.family_name || ""}`.trim();
-    const email = profile.email as string || null;
-    const picture = profile.picture as string || null;
-    const headline = profile.headline as string || null;
 
     // Check if this LinkedIn account is already connected to any workspace.
     const existing = await prisma.linkedinAccount.findFirst({
