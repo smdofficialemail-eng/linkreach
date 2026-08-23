@@ -27,24 +27,43 @@ export async function searchProfilesAction(
     mutualConnections: number | null;
   }>;
   total: number;
+  error?: string;
 }> {
+  if (!query || query.trim().length === 0) {
+    return { profiles: [], total: 0, error: "Please enter a search query." };
+  }
+
   // Try to get a LinkedIn account with an access token for real search
-  const account = await prisma.linkedinAccount.findFirst({
-    where: { workspaceId, accessToken: { not: null } },
-    orderBy: { createdAt: "desc" },
-  });
-  // Get a valid access token (refreshes if expired)
   let accessToken: string | undefined;
-  if (account?.id) {
-    try {
+  try {
+    const account = await prisma.linkedinAccount.findFirst({
+      where: { workspaceId, accessToken: { not: null } },
+      orderBy: { createdAt: "desc" },
+    });
+    if (account?.id) {
       const { getLinkedInAccessToken } = await import("@/lib/linkedin");
       accessToken = (await getLinkedInAccessToken(account.id)) || undefined;
-    } catch {
-      console.error("[Outreach] Failed to get access token");
     }
+  } catch (e) {
+    console.error("[Outreach] Failed to get access token:", e);
   }
-  const provider = getLinkedInProvider(accessToken);
-  const result = await provider.searchProfiles(query);
+
+  let provider;
+  try {
+    provider = getLinkedInProvider(accessToken);
+  } catch (e) {
+    console.error("[Outreach] Failed to create provider:", e);
+    return { profiles: [], total: 0, error: "Failed to initialize search provider." };
+  }
+
+  let result;
+  try {
+    result = await provider.searchProfiles(query);
+  } catch (e) {
+    console.error("[Outreach] Search failed:", e);
+    return { profiles: [], total: 0, error: `Search failed: ${e instanceof Error ? e.message : "Unknown error"}` };
+  }
+
   console.log("[Outreach] searchProfiles returned:", result.profiles.length, "profiles");
 
   // Upsert discovered profiles into the database

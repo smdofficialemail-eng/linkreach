@@ -140,9 +140,10 @@ export function getLinkedInProvider(accessToken?: string): LinkedInProvider {
   if (accessToken) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { VoyagerLinkedInProvider } = require("./voyager-linkedin-provider");
-      return new VoyagerLinkedInProvider(accessToken);
-    } catch {
+      const mod = require("./voyager-linkedin-provider");
+      return new mod.VoyagerLinkedInProvider(accessToken);
+    } catch (e) {
+      console.error("[LinkedInProvider] Voyager provider failed to load:", e);
       // Fall through to mock if Voyager provider fails to load
     }
   }
@@ -153,9 +154,14 @@ export function getLinkedInProvider(accessToken?: string): LinkedInProvider {
   switch (provider) {
     case "mock":
     default: {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { MockLinkedInProvider } = require("./mock-linkedin-provider");
-      return new MockLinkedInProvider();
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const mod = require("./mock-linkedin-provider");
+        return new mod.MockLinkedInProvider();
+      } catch (e) {
+        console.error("[LinkedInProvider] Mock provider failed to load:", e);
+        throw e;
+      }
     }
   }
 }

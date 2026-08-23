@@ -81,6 +81,7 @@ export function OutreachClient({
   const [searchUrl, setSearchUrl] = useState("");
   const [isSearching, setIsSearching] = useState(false);
   const [searchResultCount, setSearchResultCount] = useState(0);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [previewProfile, setPreviewProfile] =
     useState<ProfilePreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -107,14 +108,24 @@ export function OutreachClient({
 
   const handleSearch = useCallback(async (overrideQuery?: string) => {
     setIsSearching(true);
+    setSearchError(null);
     try {
       const query = overrideQuery || searchUrl || searchQuery;
+      if (!query || query.trim().length === 0) {
+        setSearchError("Please enter a search query.");
+        return;
+      }
       const result = await searchProfilesAction(query, workspaceId);
+      if (result.error) {
+        setSearchError(result.error);
+        return;
+      }
       setProfiles(result.profiles as unknown as LinkedInProfile[]);
       setSearchResultCount(result.total);
       setActiveTab("profiles");
     } catch (err) {
       console.error("Search failed:", err);
+      setSearchError("Search failed. Please try again.");
     } finally {
       setIsSearching(false);
     }
@@ -318,6 +329,11 @@ export function OutreachClient({
                 />
               </div>
             </div>
+            {searchError && (
+              <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+                {searchError}
+              </div>
+            )}
           </div>
 
           {/* Quick Search Suggestions */}
