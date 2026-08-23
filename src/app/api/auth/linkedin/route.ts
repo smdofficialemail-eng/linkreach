@@ -20,8 +20,10 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // OpenID Connect scopes (requires "Sign In with LinkedIn using OpenID Connect" product).
-  const scopes = ["openid", "profile", "email"].join(" ");
+  // OpenID Connect scopes — requires "Sign In with LinkedIn using OpenID Connect" product.
+  // If you get invalid_scope_error, enable that product at:
+  // https://www.linkedin.com/developers/apps → your app → Products tab
+  const scopes = (process.env.LINKEDIN_SCOPES || "openid profile email").trim();
 
   // State parameter — random CSRF token, stored in a cookie.
   const state = crypto.randomUUID();

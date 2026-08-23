@@ -44,6 +44,16 @@ export default async function AccountsPage({
             ? "LinkedIn access was denied. Please try again."
             : error === "already_linked_other_workspace"
               ? "This LinkedIn account is already connected to another workspace."
+              : error === "invalid_scope"
+              ? (
+                  <span>
+                    LinkedIn connection failed: <strong>invalid scope</strong>. You must enable the
+                    <strong> \"Sign In with LinkedIn using OpenID Connect\"</strong> product on your LinkedIn app.
+                    <br />
+                    Go to <a href="https://www.linkedin.com/developers/apps" target="_blank" rel="noopener noreferrer" className="underline text-brand-400">linkedin.com/developers/apps</a> → your app → <strong>Products</strong> tab → enable the product.
+                    Then redeploy on Vercel.
+                  </span>
+                )
               : `LinkedIn connection failed: ${error.replace(/_/g, " ")}`}
         </div>
       )}
