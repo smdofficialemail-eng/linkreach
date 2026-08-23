@@ -79,8 +79,10 @@ export function middleware(request: NextRequest) {
   const isApiRoute = pathname.startsWith("/api") && !isPublic;
 
   if (isAppRoute || isApiRoute) {
-    // Check for session cookie (next-auth uses a JWT cookie)
-    const sessionCookie = request.cookies.get("next-auth.session-token")
+    // Check for session cookie (NextAuth v5 uses authjs.session-token)
+    const sessionCookie = request.cookies.get("authjs.session-token")
+      || request.cookies.get("__Secure-authjs.session-token")
+      || request.cookies.get("next-auth.session-token")
       || request.cookies.get("__Secure-next-auth.session-token");
 
     if (!sessionCookie?.value) {
