@@ -9,8 +9,14 @@ const AUTH_TAG_LENGTH = 16;
  * Derive a 256-bit key from the AUTH_SECRET environment variable.
  */
 function getKey(): Buffer {
-  const secret = process.env.AUTH_SECRET || "linkreach-dev-secret-change-in-production";
-  return crypto.scryptSync(secret, "linkreach-linkedin-salt", KEY_LENGTH);
+  const secret = process.env.AUTH_SECRET;
+  if (!secret || secret.length < 32) {
+    throw new Error(
+      "AUTH_SECRET environment variable is required and must be at least 32 characters. " +
+      "Generate one with: openssl rand -base64 32"
+    );
+  }
+  return crypto.scryptSync(secret, "linkreach-v2", KEY_LENGTH);
 }
 
 /**

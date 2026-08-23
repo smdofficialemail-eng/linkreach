@@ -33,7 +33,16 @@ export async function searchProfilesAction(
     where: { workspaceId, liAt: { not: null } },
     orderBy: { createdAt: "desc" },
   });
-  const liAt = account?.liAt || undefined;
+  // Decrypt the li_at cookie before passing to the provider
+  let liAt: string | undefined;
+  if (account?.liAt) {
+    try {
+      const { decrypt } = await import("@/lib/crypto");
+      liAt = decrypt(account.liAt);
+    } catch {
+      console.error("[Outreach] Failed to decrypt li_at cookie");
+    }
+  }
   const provider = getLinkedInProvider(account?.status || undefined, liAt);
   const result = await provider.searchProfiles(query);
   console.log("[Outreach] searchProfiles returned:", result.profiles.length, "profiles");

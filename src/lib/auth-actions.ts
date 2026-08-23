@@ -6,6 +6,8 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { signIn, signOut } from "@/lib/auth";
+import { rateLimit, RATE_LIMITS } from "@/lib/rate-limit";
+import { auditAuth } from "@/lib/audit";
 
 const registerSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -15,6 +17,10 @@ const registerSchema = z.object({
 });
 
 export async function registerAction(_prev: unknown, formData: FormData) {
+  // Rate limit: 3 registrations per hour per IP
+  const rl = rateLimit("register", RATE_LIMITS.register.limit, RATE_LIMITS.register.windowMs);
+  if (!rl.allowed) return { error: "Too many registration attempts. Please try again later." };
+
   const parsed = registerSchema.safeParse({
     name: formData.get("name"),
     email: formData.get("email"),
@@ -74,6 +80,10 @@ export async function registerAction(_prev: unknown, formData: FormData) {
 }
 
 export async function loginAction(_prev: unknown, formData: FormData) {
+  // Rate limit: 5 login attempts per 15 min per IP
+  const rl = rateLimit("login", RATE_LIMITS.login.limit, RATE_LIMITS.login.windowMs);
+  if (!rl.allowed) return { error: "Too many login attempts. Please try again in 15 minutes." };
+
   try {
     await signIn("credentials", {
       email: formData.get("email"),
@@ -82,14 +92,25 @@ export async function loginAction(_prev: unknown, formData: FormData) {
     });
   } catch (error) {
     if (error instanceof AuthError) {
+      await auditAuth("auth.login_failed", "unknown", String(formData.get("email") || ""));
       return { error: "Invalid email or password." };
     }
     throw error;
   }
+  // Audit successful login
+  const loginEmail = String(formData.get("email") || "");
+  const loginUser = await prisma.user.findUnique({ where: { email: loginEmail.toLowerCase() } });
+  if (loginUser) await auditAuth("auth.login", loginUser.id, loginEmail);
   redirect("/app");
 }
 
 export async function logoutAction() {
+  // Audit logout (user id from session)
+  const { getSession } = await import("@/lib/app");
+  const session = await getSession();
+  if (session?.user?.id) {
+    await auditAuth("auth.logout", session.user.id, session.user.email || "unknown");
+  }
   await signOut({ redirect: false });
   redirect("/login");
 }
