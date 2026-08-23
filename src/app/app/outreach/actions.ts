@@ -28,22 +28,22 @@ export async function searchProfilesAction(
   }>;
   total: number;
 }> {
-  // Try to get a LinkedIn account with a session cookie for real search
+  // Try to get a LinkedIn account with an access token for real search
   const account = await prisma.linkedinAccount.findFirst({
-    where: { workspaceId, liAt: { not: null } },
+    where: { workspaceId, accessToken: { not: null } },
     orderBy: { createdAt: "desc" },
   });
-  // Decrypt the li_at cookie before passing to the provider
-  let liAt: string | undefined;
-  if (account?.liAt) {
+  // Get a valid access token (refreshes if expired)
+  let accessToken: string | undefined;
+  if (account?.id) {
     try {
-      const { decrypt } = await import("@/lib/crypto");
-      liAt = decrypt(account.liAt);
+      const { getLinkedInAccessToken } = await import("@/lib/linkedin");
+      accessToken = (await getLinkedInAccessToken(account.id)) || undefined;
     } catch {
-      console.error("[Outreach] Failed to decrypt li_at cookie");
+      console.error("[Outreach] Failed to get access token");
     }
   }
-  const provider = getLinkedInProvider(account?.status || undefined, liAt);
+  const provider = getLinkedInProvider(accessToken);
   const result = await provider.searchProfiles(query);
   console.log("[Outreach] searchProfiles returned:", result.profiles.length, "profiles");
 

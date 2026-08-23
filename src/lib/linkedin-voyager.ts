@@ -1,13 +1,8 @@
 /**
  * LinkedIn Voyager API Client
  *
- * Uses LinkedIn's internal Voyager API (same endpoints the website uses)
- * to search profiles, get profile details, and perform actions.
- *
- * Requires a valid LinkedIn session cookie (li_at).
- *
- * WARNING: This uses unofficial LinkedIn endpoints. Use at your own risk.
- * LinkedIn may change these endpoints without notice.
+ * Uses LinkedIn's internal Voyager API with the OAuth access token
+ * to search profiles and perform actions.
  */
 
 export interface VoyagerProfile {
@@ -29,39 +24,56 @@ export interface VoyagerProfile {
 export interface VoyagerSearchResult {
   results: VoyagerProfile[];
   total: number;
-  searchId?: string;
 }
 
-// Required headers for Voyager API requests
-function getHeaders(liAt: string, csrfToken?: string) {
-  return {
-    "Cookie": `li_at=${liAt};${csrfToken ? ` JSESSIONID="${csrfToken}"` : ""}`,
+/**
+ * Make an authenticated request to LinkedIn's Voyager API.
+ */
+async function voyagerRequest(
+  accessToken: string,
+  url: string,
+  options?: { method?: string; body?: unknown }
+): Promise<unknown> {
+  const headers: Record<string, string> = {
+    "Authorization": `Bearer ${accessToken}`,
     "Accept": "application/json",
     "x-restli-protocol-version": "2.0.0",
     "x-li-lang": "en_US",
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "x-li-page-instance": "voyager-feed",
-    "x-li-track": JSON.stringify({
-      clientVersion: "1.13.0",
-      deviceFormFactor: "DESKTOP",
-      mpName: "voyager-web",
-    }),
   };
+
+  if (options?.body) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  const response = await fetch(url, {
+    method: options?.method || "GET",
+    headers,
+    body: options?.body ? JSON.stringify(options.body) : undefined,
+  });
+
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw new Error("LinkedIn session expired. Please reconnect your LinkedIn account.");
+    }
+    throw new Error(`LinkedIn API error: ${response.status}`);
+  }
+
+  return response.json();
 }
 
 /**
- * Search LinkedIn profiles using the Voyager search API.
+ * Search LinkedIn profiles using the Voyager API with OAuth token.
  *
- * @param liAt - The li_at session cookie value
- * @param keywords - Search keywords (e.g., "founders india")
+ * @param accessToken - LinkedIn OAuth access token
+ * @param keywords - Search keywords
  * @param options - Optional filters
  */
 export async function searchProfiles(
-  liAt: string,
+  accessToken: string,
   keywords: string,
   options?: {
     location?: string;
-    industry?: string;
     title?: string;
     company?: string;
     connectionDegree?: string;
@@ -69,46 +81,24 @@ export async function searchProfiles(
     start?: number;
   }
 ): Promise<VoyagerSearchResult> {
-  // Build search parameters
-  const searchParams = new URLSearchParams();
-  searchParams.set("keywords", keywords);
-  searchParams.set("origin", "FACETED_SEARCH");
+  // Build search URL with query parameters
+  const params = new URLSearchParams();
+  params.set("keywords", keywords);
+  params.set("origin", "FACETED_SEARCH");
 
-  if (options?.location) {
-    searchParams.set("geoUrn", options.location);
-  }
-  if (options?.title) {
-    searchParams.set("title", options.title);
-  }
-  if (options?.company) {
-    searchParams.set("company", options.company);
-  }
-  if (options?.connectionDegree) {
-    searchParams.set("connectionOf", options.connectionDegree);
-  }
+  if (options?.location) params.set("geoUrn", options.location);
+  if (options?.title) params.set("title", options.title);
+  if (options?.company) params.set("company", options.company);
 
   const start = options?.start || 0;
   const count = options?.limit || 25;
-  searchParams.set("start", String(start));
-  searchParams.set("count", String(count));
+  params.set("start", String(start));
+  params.set("count", String(count));
 
-  // Use the search API endpoint
-  const url = `https://www.linkedin.com/voyager/api/search/cluster?${searchParams.toString()}`;
+  const url = `https://www.linkedin.com/voyager/api/search/cluster?${params.toString()}`;
 
   try {
-    const response = await fetch(url, {
-      headers: getHeaders(liAt),
-      method: "GET",
-    });
-
-    if (!response.ok) {
-      if (response.status === 401 || response.status === 403) {
-        throw new Error("LinkedIn session expired. Please reconnect your LinkedIn account.");
-      }
-      throw new Error(`LinkedIn API error: ${response.status}`);
-    }
-
-    const data = await response.json();
+    const data = await voyagerRequest(accessToken, url);
     return parseSearchResults(data);
   } catch (error) {
     console.error("[Voyager] Search failed:", error);
@@ -117,32 +107,22 @@ export async function searchProfiles(
 }
 
 /**
- * Get detailed profile information from LinkedIn.
+ * Get detailed profile information.
  *
- * @param liAt - The li_at session cookie value
+ * @param accessToken - LinkedIn OAuth access token
  * @param profileUrl - LinkedIn profile URL or public ID
  */
 export async function getProfile(
-  liAt: string,
+  accessToken: string,
   profileUrl: string
 ): Promise<VoyagerProfile | null> {
-  // Extract public ID from URL
   const publicId = extractPublicId(profileUrl);
   if (!publicId) return null;
 
   const url = `https://www.linkedin.com/voyager/api/identity/profiles/${publicId}`;
 
   try {
-    const response = await fetch(url, {
-      headers: getHeaders(liAt),
-      method: "GET",
-    });
-
-    if (!response.ok) {
-      return null;
-    }
-
-    const data = await response.json();
+    const data = await voyagerRequest(accessToken, url);
     return parseProfileData(data);
   } catch (error) {
     console.error("[Voyager] Profile fetch failed:", error);
@@ -151,23 +131,15 @@ export async function getProfile(
 }
 
 /**
- * Send a connection request via Voyager API.
+ * Send a connection request.
  */
 export async function sendConnectionRequest(
-  liAt: string,
+  accessToken: string,
   profileUrl: string,
   note?: string
 ): Promise<{ success: boolean; message: string }> {
-  const publicId = extractPublicId(profileUrl);
-  if (!publicId) {
-    return { success: false, message: "Invalid profile URL" };
-  }
-
-  // First get the profile to find the tracking ID
-  const profile = await getProfile(liAt, profileUrl);
-  if (!profile) {
-    return { success: false, message: "Could not fetch profile" };
-  }
+  const profile = await getProfile(accessToken, profileUrl);
+  if (!profile) return { success: false, message: "Could not fetch profile" };
 
   const url = `https://www.linkedin.com/voyager/api/growth/nodes/INVITE_TO_CONNECT`;
 
@@ -175,25 +147,10 @@ export async function sendConnectionRequest(
     invitedProfileId: profile.urn,
     invitationType: "CONNECTION",
   };
-
-  if (note) {
-    body.message = note;
-  }
+  if (note) body.message = note;
 
   try {
-    const response = await fetch(url, {
-      headers: {
-        ...getHeaders(liAt),
-        "Content-Type": "application/json",
-      },
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-
-    if (!response.ok) {
-      return { success: false, message: `LinkedIn API error: ${response.status}` };
-    }
-
+    await voyagerRequest(accessToken, url, { method: "POST", body });
     return { success: true, message: "Connection request sent" };
   } catch (error) {
     return { success: false, message: String(error) };
@@ -201,17 +158,15 @@ export async function sendConnectionRequest(
 }
 
 /**
- * Send a message via Voyager API.
+ * Send a message.
  */
 export async function sendMessage(
-  liAt: string,
+  accessToken: string,
   profileUrl: string,
   message: string
 ): Promise<{ success: boolean; message: string }> {
   const publicId = extractPublicId(profileUrl);
-  if (!publicId) {
-    return { success: false, message: "Invalid profile URL" };
-  }
+  if (!publicId) return { success: false, message: "Invalid profile URL" };
 
   const url = `https://www.linkedin.com/voyager/api/messaging/conversations?action=create`;
 
@@ -221,37 +176,21 @@ export async function sendMessage(
   };
 
   try {
-    const response = await fetch(url, {
-      headers: {
-        ...getHeaders(liAt),
-        "Content-Type": "application/json",
-      },
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-
-    if (!response.ok) {
-      return { success: false, message: `LinkedIn API error: ${response.status}` };
-    }
-
+    await voyagerRequest(accessToken, url, { method: "POST", body });
     return { success: true, message: "Message sent" };
   } catch (error) {
     return { success: false, message: String(error) };
   }
 }
 
-// ---- Helper functions ----
+// ---- Helpers ----
 
 function extractPublicId(urlOrId: string): string | null {
-  // Handle direct public IDs
   if (!urlOrId.includes("/") && !urlOrId.includes("linkedin.com")) {
     return urlOrId;
   }
-
-  // Handle URLs like https://www.linkedin.com/in/username/
   const match = urlOrId.match(/linkedin\.com\/in\/([^/?]+)/);
   if (match) return match[1];
-
   return null;
 }
 
@@ -281,30 +220,26 @@ function parseSearchResults(data: unknown): VoyagerSearchResult {
 function parseSearchItem(item: unknown): VoyagerProfile | null {
   try {
     const i = item as Record<string, unknown>;
-    const result = i.result ?? i;
+    const result = (i.result as Record<string, unknown>) ?? i;
     const r = result as Record<string, unknown>;
 
-    const publicIdentity = r.publicIdentity ?? r;
+    const publicIdentity = (r.publicIdentity as Record<string, unknown>) ?? r;
     const pi = publicIdentity as Record<string, unknown>;
-    const profilePicture = r.profilePicture ?? r;
+    const profilePicture = (r.profilePicture as Record<string, unknown>) ?? r;
 
-    // Extract URN and public ID
     const urn = String(r.urn || r.trackingUrn || pi.urn || "");
     const publicId = String(pi.publicId || r.publicId || r.vmid || "");
 
-    // Get name parts
     const firstName = String(pi.firstName || r.firstName || "");
     const lastName = String(pi.lastName || r.lastName || "");
+
     const occupations = r.occupations as Record<string, unknown> | undefined;
     const headline = String(r.headline || occupations?.headline || "");
     const location = String(r.location || r.geoLocation || r.locationName || "");
 
-    // Get avatar
-    const pic = profilePicture as Record<string, unknown>;
-    const displayImageRaw = pic?.displayImage ?? pic?.rootUrl;
+    const displayImageRaw = profilePicture?.displayImage ?? profilePicture?.rootUrl;
     const displayImage = typeof displayImageRaw === "string" ? displayImageRaw : undefined;
 
-    // Get connection info
     const degree = r.connectionDegree ?? r.degree;
 
     if (!firstName && !lastName) return null;
@@ -336,11 +271,13 @@ function parseProfileData(data: unknown): VoyagerProfile | null {
     const lastName = String(d.lastName || "");
     const headline = String(d.headline || "");
     const publicId = String(d.publicId || d.vanityName || "");
+
     const geoLoc = d.geoLocation as Record<string, unknown> | undefined;
     const location = String(d.locationName || geoLoc?.full || "");
 
     const pic = d.profilePicture as Record<string, unknown> | undefined;
-    const displayImage = pic?.displayImage as string | undefined;
+    const displayImageRaw = pic?.displayImage;
+    const displayImage = typeof displayImageRaw === "string" ? displayImageRaw : undefined;
 
     return {
       urn: String(d.urn || ""),

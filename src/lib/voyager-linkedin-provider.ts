@@ -1,8 +1,8 @@
 /**
  * Voyager-based LinkedIn Provider
  *
- * Uses LinkedIn's internal Voyager API for real profile search.
- * Requires a valid li_at session cookie stored in the LinkedinAccount.
+ * Uses LinkedIn's internal Voyager API with the OAuth access token
+ * for real profile search. No extension or cookie copying needed.
  */
 
 import {
@@ -23,10 +23,10 @@ export class VoyagerLinkedInProvider implements LinkedInProvider {
   readonly name = "LinkedIn Voyager API";
   readonly isMock = false;
 
-  private liAt: string;
+  private accessToken: string;
 
-  constructor(liAt: string) {
-    this.liAt = liAt;
+  constructor(accessToken: string) {
+    this.accessToken = accessToken;
   }
 
   async searchProfiles(
@@ -45,7 +45,7 @@ export class VoyagerLinkedInProvider implements LinkedInProvider {
     const keywords = options?.keywords || query;
 
     try {
-      const result = await voyagerSearch(this.liAt, keywords, {
+      const result = await voyagerSearch(this.accessToken, keywords, {
         location: options?.location,
         title: options?.title,
         company: options?.company,
@@ -68,7 +68,7 @@ export class VoyagerLinkedInProvider implements LinkedInProvider {
 
   async getProfile(profileUrl: string): Promise<LinkedInProfileData | null> {
     try {
-      const profile = await voyagerGetProfile(this.liAt, profileUrl);
+      const profile = await voyagerGetProfile(this.accessToken, profileUrl);
       if (!profile) return null;
       return this.toProfileData(profile);
     } catch (error) {
@@ -82,7 +82,7 @@ export class VoyagerLinkedInProvider implements LinkedInProvider {
     note?: string
   ): Promise<SendResult> {
     try {
-      const result = await voyagerSendConnection(this.liAt, profileUrl, note);
+      const result = await voyagerSendConnection(this.accessToken, profileUrl, note);
       return {
         success: result.success,
         error: result.success ? undefined : result.message,
@@ -97,7 +97,7 @@ export class VoyagerLinkedInProvider implements LinkedInProvider {
     message: string
   ): Promise<SendResult> {
     try {
-      const result = await voyagerSendMessage(this.liAt, profileUrl, message);
+      const result = await voyagerSendMessage(this.accessToken, profileUrl, message);
       return {
         success: result.success,
         error: result.success ? undefined : result.message,
@@ -110,14 +110,11 @@ export class VoyagerLinkedInProvider implements LinkedInProvider {
   async getConnectionStatus(
     _profileUrl: string
   ): Promise<"none" | "pending" | "connected"> {
-    // Voyager API can check connection status, but for now return "none"
     return "none";
   }
 
-  /** Convert Voyager profile to our internal format */
   private toProfileData(p: VoyagerProfile): LinkedInProfileData {
-    const nameParts = [p.firstName, p.lastName].filter(Boolean);
-    const fullName = nameParts.join(" ") || "LinkedIn User";
+    const fullName = [p.firstName, p.lastName].filter(Boolean).join(" ") || "LinkedIn User";
 
     return {
       id: p.urn || p.publicId || "",

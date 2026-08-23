@@ -133,16 +133,15 @@ export interface LinkedInProvider {
 /**
  * Factory to get the active LinkedIn provider.
  *
- * @param deliveryMode - If "server" and a liAt cookie is provided, uses Voyager API
- * @param liAt - Optional LinkedIn session cookie for real API access
+ * @param accessToken - Optional LinkedIn OAuth access token for real API access
  */
-export function getLinkedInProvider(deliveryMode?: string, liAt?: string): LinkedInProvider {
-  // If we have a session cookie, use the Voyager API for real LinkedIn search
-  if (liAt && deliveryMode !== "simulation") {
+export function getLinkedInProvider(accessToken?: string): LinkedInProvider {
+  // If we have an access token, use the Voyager API for real LinkedIn search
+  if (accessToken) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { VoyagerLinkedInProvider } = require("./voyager-linkedin-provider");
-      return new VoyagerLinkedInProvider(liAt);
+      return new VoyagerLinkedInProvider(accessToken);
     } catch {
       // Fall through to mock if Voyager provider fails to load
     }
