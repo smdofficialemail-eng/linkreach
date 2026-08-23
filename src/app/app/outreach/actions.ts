@@ -48,37 +48,140 @@ export async function searchProfilesAction(
     console.error("[Outreach] Failed to get access token:", e);
   }
 
-  // Try real search first, fall back to mock if it fails
-  let provider;
-  let usedMock = false;
-  try {
-    provider = getLinkedInProvider(accessToken);
-  } catch (e) {
-    console.error("[Outreach] Failed to create provider:", e);
-    // Fall back to mock
-    provider = getLinkedInProvider();
-    usedMock = true;
+  // Try real search: headless browser > Voyager API > mock
+  let result;
+  let usedRealSearch = false;
+
+  // 1. Try headless browser search (if credentials are saved)
+  const accountWithCreds = await prisma.linkedinAccount.findFirst({
+    where: { workspaceId, linkedinLogin: { not: null }, passwordEnc: { not: null } },
+    orderBy: { createdAt: "desc" },
+  });
+
+  if (accountWithCreds?.linkedinLogin && accountWithCreds?.passwordEnc) {
+    try {
+      const { decrypt } = await import("@/lib/crypto");
+      const { loginLinkedIn } = await import("@/lib/linkedin-session");
+      const password = decrypt(accountWithCreds.passwordEnc);
+      
+      console.log("[Outreach] Attempting headless browser search for:", query);
+      const { context, page } = await loginLinkedIn(
+        accountWithCreds.id,
+        accountWithCreds.linkedinLogin,
+        password
+      );
+
+      try {
+        // Navigate to LinkedIn search
+        const searchUrl = `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(query)}`;
+        await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+        await page.waitForTimeout(5000);
+
+        // Check if we're on the search results page
+        if (page.url().includes("/search/results")) {
+          // Extract profiles from the page
+          const profiles = await page.evaluate(() => {
+            const items = document.querySelectorAll(".reusable-search__result-container .entity-result");
+            const results: Array<Record<string, unknown>> = [];
+            
+            items.forEach((item) => {
+              try {
+                const nameEl = item.querySelector(".entity-result__title-text a span[aria-hidden]");
+                const headlineEl = item.querySelector(".entity-result__primary-subtitle");
+                const locationEl = item.querySelector(".entity-result__secondary-subtitle");
+                const linkEl = item.querySelector(".entity-result__title-text a");
+                const imgEl = item.querySelector("img.presence-entity__image, img.EntityPhoto-circle-5");
+                
+                const name = nameEl?.textContent?.trim() || "";
+                const headline = headlineEl?.textContent?.trim() || "";
+                const location = locationEl?.textContent?.trim() || "";
+                const profileUrl = linkEl?.getAttribute("href") || "";
+                const avatarUrl = imgEl?.getAttribute("src") || "";
+                
+                if (name) {
+                  const nameParts = name.split(" ");
+                  results.push({
+                    id: profileUrl.replace(/.*\/in\//, "").replace(/\//, "") || name.toLowerCase().replace(/\s+/g, "-"),
+                    firstName: nameParts[0] || "",
+                    lastName: nameParts.slice(1).join(" ") || "",
+                    fullName: name,
+                    headline,
+                    location,
+                    profileUrl: profileUrl.startsWith("http") ? profileUrl : `https://www.linkedin.com${profileUrl}`,
+                    avatarUrl,
+                    company: headline.split(" at ")[1] || "",
+                    jobTitle: headline.split(" at ")[0] || "",
+                    isPremium: false,
+                    isOpenToWork: false,
+                    isCreator: false,
+                    connectionDegree: 2,
+                  });
+                }
+              } catch {}
+            });
+            return results;
+          });
+
+          if (profiles.length > 0) {
+            result = {
+              profiles: profiles.map((p: Record<string, unknown>) => ({
+                id: String(p.id),
+                publicId: String(p.id),
+                firstName: String(p.firstName),
+                lastName: String(p.lastName),
+                fullName: String(p.fullName),
+                headline: String(p.headline || ""),
+                company: String(p.company || ""),
+                jobTitle: String(p.jobTitle || ""),
+                location: String(p.location || ""),
+                profileUrl: String(p.profileUrl || ""),
+                avatarUrl: String(p.avatarUrl || ""),
+                connectionDegree: 2,
+                isPremium: false,
+                isOpenToWork: false,
+                isCreator: false,
+              })),
+              total: profiles.length,
+            };
+            usedRealSearch = true;
+            console.log("[Outreach] Headless browser search returned", profiles.length, "profiles");
+          }
+        }
+      } finally {
+        await context.close();
+      }
+    } catch (e) {
+      console.error("[Outreach] Headless browser search failed:", e);
+      // Fall through to other methods
+    }
   }
 
-  let result;
-  try {
-    result = await provider.searchProfiles(query);
-  } catch (e) {
-    console.error("[Outreach] Real search failed:", e);
-    if (!usedMock && accessToken) {
-      // Token expired or invalid — fall back to mock provider
-      console.log("[Outreach] Falling back to mock provider");
-      try {
-        const mockProvider = getLinkedInProvider();
-        result = await mockProvider.searchProfiles(query);
-        usedMock = true;
-      } catch (e2) {
-        console.error("[Outreach] Mock fallback also failed:", e2);
-        return { profiles: [], total: 0, error: `Search failed: ${e instanceof Error ? e.message : "Unknown error"}` };
-      }
-    } else {
-      return { profiles: [], total: 0, error: `Search failed: ${e instanceof Error ? e.message : "Unknown error"}` };
+  // 2. Try Voyager API (if OAuth token available)
+  if (!usedRealSearch && accessToken) {
+    try {
+      const provider = getLinkedInProvider(accessToken);
+      result = await provider.searchProfiles(query);
+      usedRealSearch = true;
+      console.log("[Outreach] Voyager API search returned", result.profiles.length, "profiles");
+    } catch (e) {
+      console.error("[Outreach] Voyager API search failed:", e);
     }
+  }
+
+  // 3. Fall back to mock if nothing worked
+  if (!usedRealSearch) {
+    try {
+      const mockProvider = getLinkedInProvider();
+      result = await mockProvider.searchProfiles(query);
+      console.log("[Outreach] Mock provider returned", result.profiles.length, "profiles");
+    } catch (e) {
+      console.error("[Outreach] Mock provider also failed:", e);
+      return { profiles: [], total: 0, error: "Search failed. Please try again." };
+    }
+  }
+
+  if (!result) {
+    return { profiles: [], total: 0, error: "Search failed. Please try again." };
   }
 
   console.log("[Outreach] searchProfiles returned:", result.profiles.length, "profiles");
@@ -86,55 +189,56 @@ export async function searchProfilesAction(
   // Upsert discovered profiles into the database
   for (const p of result.profiles) {
     try {
-    await prisma.linkedInProfile.upsert({
-      where: {
-        workspaceId_linkedinId: {
+      const raw = p as unknown as Record<string, unknown>;
+      await prisma.linkedInProfile.upsert({
+        where: {
+          workspaceId_linkedinId: {
+            workspaceId,
+            linkedinId: p.id,
+          },
+        },
+        update: {
+          fullName: p.fullName,
+          firstName: p.firstName ?? null,
+          lastName: p.lastName ?? null,
+          headline: p.headline ?? null,
+          company: p.company ?? null,
+          jobTitle: p.jobTitle ?? null,
+          location: p.location ?? null,
+          profileUrl: p.profileUrl ?? null,
+          avatarUrl: p.avatarUrl ?? null,
+          about: (raw.about as string) ?? null,
+          connectionDegree: p.connectionDegree ?? null,
+          isPremium: p.isPremium,
+          isOpenToWork: p.isOpenToWork,
+          mutualConnections: (raw.mutualConnections as number) ?? null,
+          raw: JSON.parse(JSON.stringify(p)),
+          cachedAt: new Date(),
+        },
+        create: {
           workspaceId,
           linkedinId: p.id,
+          publicId: p.publicId ?? null,
+          fullName: p.fullName,
+          firstName: p.firstName ?? null,
+          lastName: p.lastName ?? null,
+          headline: p.headline ?? null,
+          company: p.company ?? null,
+          jobTitle: p.jobTitle ?? null,
+          location: p.location ?? null,
+          industry: (raw.industry as string) ?? null,
+          profileUrl: p.profileUrl ?? null,
+          avatarUrl: p.avatarUrl ?? null,
+          about: (raw.about as string) ?? null,
+          connectionDegree: p.connectionDegree ?? null,
+          isPremium: p.isPremium,
+          isOpenToWork: p.isOpenToWork,
+          isCreator: p.isCreator,
+          mutualConnections: (raw.mutualConnections as number) ?? null,
+          raw: JSON.parse(JSON.stringify(p)),
+          source: "search",
         },
-      },
-      update: {
-        fullName: p.fullName,
-        firstName: p.firstName ?? null,
-        lastName: p.lastName ?? null,
-        headline: p.headline ?? null,
-        company: p.company ?? null,
-        jobTitle: p.jobTitle ?? null,
-        location: p.location ?? null,
-        profileUrl: p.profileUrl ?? null,
-        avatarUrl: p.avatarUrl ?? null,
-        about: p.about ?? null,
-        connectionDegree: p.connectionDegree ?? null,
-        isPremium: p.isPremium,
-        isOpenToWork: p.isOpenToWork,
-        mutualConnections: p.mutualConnections ?? null,
-        raw: JSON.parse(JSON.stringify(p)),
-        cachedAt: new Date(),
-      },
-      create: {
-        workspaceId,
-        linkedinId: p.id,
-        publicId: p.publicId ?? null,
-        fullName: p.fullName,
-        firstName: p.firstName ?? null,
-        lastName: p.lastName ?? null,
-        headline: p.headline ?? null,
-        company: p.company ?? null,
-        jobTitle: p.jobTitle ?? null,
-        location: p.location ?? null,
-        industry: p.industry ?? null,
-        profileUrl: p.profileUrl ?? null,
-        avatarUrl: p.avatarUrl ?? null,
-        about: p.about ?? null,
-        connectionDegree: p.connectionDegree ?? null,
-        isPremium: p.isPremium,
-        isOpenToWork: p.isOpenToWork,
-        isCreator: p.isCreator,
-        mutualConnections: p.mutualConnections ?? null,
-        raw: JSON.parse(JSON.stringify(p)),
-        source: "search",
-      },
-    });
+      });
     } catch (err) {
       console.error("[Outreach] upsert failed for", p.fullName, err);
     }
@@ -150,19 +254,25 @@ export async function searchProfilesAction(
   });
 
   return {
-    profiles: result.profiles.map((p) => ({
-      ...p,
-      headline: p.headline ?? null,
-      company: p.company ?? null,
-      jobTitle: p.jobTitle ?? null,
-      location: p.location ?? null,
-      profileUrl: p.profileUrl ?? null,
-      avatarUrl: p.avatarUrl ?? null,
-      firstName: p.firstName ?? null,
-      lastName: p.lastName ?? null,
-      connectionDegree: p.connectionDegree ?? null,
-      mutualConnections: p.mutualConnections ?? null,
-    })),
+    profiles: result.profiles.map((p) => {
+      const raw = p as unknown as Record<string, unknown>;
+      return {
+        id: p.id,
+        fullName: p.fullName,
+        headline: p.headline ?? null,
+        company: p.company ?? null,
+        jobTitle: p.jobTitle ?? null,
+        location: p.location ?? null,
+        profileUrl: p.profileUrl ?? null,
+        avatarUrl: p.avatarUrl ?? null,
+        firstName: p.firstName ?? null,
+        lastName: p.lastName ?? null,
+        connectionDegree: p.connectionDegree ?? null,
+        isPremium: p.isPremium,
+        isOpenToWork: p.isOpenToWork,
+        mutualConnections: (raw.mutualConnections as number) ?? null,
+      };
+    }),
     total: result.total,
   };
 }
