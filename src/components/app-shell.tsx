@@ -10,16 +10,21 @@ const NAV = [
     section: "Workspace",
     items: [
       { href: "/app", label: "Dashboard", icon: "◧" },
+      { href: "/app/outreach", label: "Outreach", icon: "◎" },
       { href: "/app/campaigns", label: "Campaigns", icon: "⇶" },
       { href: "/app/leads", label: "Leads", icon: "▤" },
       { href: "/app/inbox", label: "Inbox", icon: "✉" },
-      { href: "/app/accounts", label: "Accounts", icon: "◉" },
+      { href: "/app/accounts", label: "LinkedIn Accounts", icon: "◉" },
+      { href: "/app/templates", label: "Templates", icon: "▭" },
       { href: "/app/analytics", label: "Analytics", icon: "◔" },
     ],
   },
   {
-    section: "Other",
-    items: [{ href: "/app/settings", label: "Settings", icon: "⚙" }],
+    section: "Manage",
+    items: [
+      { href: "/app/blacklist", label: "Blacklist", icon: "⊘" },
+      { href: "/app/settings", label: "Settings", icon: "⚙" },
+    ],
   },
 ];
 

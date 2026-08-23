@@ -23,8 +23,16 @@ model Workspace {
   lists         List[]
   campaigns     Campaign[]
   conversations Conversation[]
-  activityLogs  ActivityLog[]
-  extensionJobs ExtensionJob[]
+  activityLogs     ActivityLog[]
+  extensionJobs    ExtensionJob[]
+  linkedinProfiles LinkedInProfile[]
+  selections       OutreachSelection[]
+  templates        Template[]
+  blacklist        BlacklistEntry[]
+  scheduledActions ScheduledAction[]
+  notifications    Notification[]
+  auditLogs        AuditLog[]
+  subscription     Subscription?
 }
 
 // A job queued for the paired browser extension to execute on LinkedIn.
@@ -104,30 +112,38 @@ model LinkedinAccount {
 }
 
 model Lead {
-  id           String   @id @default(cuid())
-  workspaceId  String
-  name         String
-  headline     String?
-  company      String?
-  linkedinUrl  String?
-  location     String?
-  email        String?
-  phone        String?
-  notes        String?
-  source       String   @default("manual") // manual | csv | event | import
-  status       String   @default("new") // new | contacted | replied | booked | negative
-  tags         Json?    @default("[]")
-  listId       String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id               String   @id @default(cuid())
+  workspaceId      String
+  linkedinProfileId String?  // link to discovered profile
+  name             String
+  headline         String?
+  company          String?
+  jobTitle         String?
+  linkedinUrl      String?
+  location         String?
+  email            String?
+  phone            String?
+  about            String?
+  industry         String?
+  avatarUrl        String?
+  notes            String?
+  source           String   @default("manual") // manual | csv | event | import | outreach
+  status           String   @default("new") // new | saved | queued | connection_pending | connected | message_pending | messaged | replied | not_interested | blacklisted | completed | failed | booked | negative
+  tags             Json?    @default("[]")
+  listId           String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  workspace        Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  list             List?             @relation(fields: [listId], references: [id], onDelete: SetNull)
+  workspace        Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  linkedinProfile  LinkedInProfile?   @relation("LinkedInProfileToLead", fields: [linkedinProfileId], references: [id])
+  list             List?              @relation(fields: [listId], references: [id], onDelete: SetNull)
   campaignMembers  CampaignMember[]
   conversations    Conversation[]
 
+  @@unique([linkedinProfileId])
   @@index([workspaceId])
   @@index([status])
+  @@index([linkedinProfileId])
 }
 
 model List {
@@ -242,7 +258,8 @@ model ActivityLog {
   id          String    @id @default(cuid())
   workspaceId String
   campaignId  String?
-  type        String    // sent | accepted | replied | booked | imported | note
+  leadId      String?
+  type        String    // sent | accepted | replied | booked | imported | note | connection_sent | connection_accepted | message_sent | message_received | profile_viewed | campaign_started | campaign_paused
   message     String?
   meta        Json?  @default("[]")
   createdAt   DateTime  @default(now())
@@ -250,4 +267,182 @@ model ActivityLog {
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId, createdAt])
+}
+
+// Discovered/searched LinkedIn profiles (not yet leads)
+model LinkedInProfile {
+  id              String   @id @default(cuid())
+  workspaceId     String
+  linkedinId      String?  // LinkedIn public identifier
+  publicId        String?  // vanity URL slug
+  firstName       String?
+  lastName        String?
+  fullName        String
+  headline        String?
+  company         String?
+  jobTitle        String?
+  location        String?
+  industry        String?
+  profileUrl      String?
+  avatarUrl       String?
+  about           String?
+  connectionDegree Int?
+  isPremium       Boolean  @default(false)
+  isOpenToWork    Boolean  @default(false)
+  isCreator       Boolean  @default(false)
+  mutualConnections Int?
+  raw             Json?    // full profile data from provider
+  source          String   @default("search") // search | csv | import | manual | extension
+  cachedAt        DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  workspace    Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  lead         Lead?                  @relation("LinkedInProfileToLead")
+  blacklist    BlacklistEntry?        @relation("LinkedInProfileToBlacklist")
+  selections  OutreachSelection[]
+
+  @@unique([workspaceId, linkedinId])
+  @@index([workspaceId])
+}
+
+// Outreach selections — profiles the user has selected for action
+model OutreachSelection {
+  id              String   @id @default(cuid())
+  workspaceId     String
+  linkedinProfileId String
+  selectedAt      DateTime @default(now())
+
+  workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  linkedinProfile LinkedInProfile @relation(fields: [linkedinProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, linkedinProfileId])
+  @@index([workspaceId])
+}
+
+model Template {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  content     String
+  category    String   @default("connection_note") // connection_note | first_message | follow_up | breakup
+  variables   Json?    @default("[]")
+  isDefault   Boolean  @default(false)
+  createdBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, category])
+}
+
+model BlacklistEntry {
+  id              String   @id @default(cuid())
+  workspaceId     String
+  linkedinProfileId String?
+  profileUrl      String?
+  name            String?
+  reason          String   @default("manual") // manual | already_contacted | competitor | existing_client | not_relevant | do_not_contact
+  notes           String?
+  addedBy         String?
+  createdAt       DateTime @default(now())
+
+  workspace      Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  linkedinProfile LinkedInProfile? @relation("LinkedInProfileToBlacklist", fields: [linkedinProfileId], references: [id])
+
+  @@unique([linkedinProfileId])
+  @@index([workspaceId])
+}
+
+model ScheduledAction {
+  id              String    @id @default(cuid())
+  workspaceId     String
+  campaignId      String
+  leadId          String
+  linkedinAccountId String?
+  stepId          String?
+  action          String    // profile_view | connection_request | message | follow_up | reaction
+  payload         Json?     @default("{}")
+  status          String    @default("queued") // queued | running | success | failed | retrying | cancelled
+  scheduledAt     DateTime
+  startedAt       DateTime?
+  completedAt     DateTime?
+  attempts        Int       @default(0)
+  maxAttempts     Int       @default(3)
+  lastError       String?
+  nextRetryAt     DateTime?
+  result          Json?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, status])
+  @@index([workspaceId, scheduledAt])
+  @@index([status, scheduledAt])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String?
+  action      String   // create | update | delete | login | logout | campaign_start | campaign_pause | connection_send
+  resource    String?  // campaign | lead | account | template | settings
+  resourceId  String?
+  details     Json?
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+}
+
+model Notification {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String?
+  type        String   // connection_accepted | lead_replied | campaign_completed | campaign_paused | account_disconnected | execution_failed | auth_required | daily_limit
+  title       String?
+  message     String?
+  read        Boolean  @default(false)
+  meta        Json?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, read])
+}
+
+model Plan {
+  id             String   @id @default(cuid())
+  name           String   @unique // free | starter | professional | agency
+  displayName    String
+  maxAccounts    Int      @default(1)
+  maxCampaigns   Int      @default(1)
+  maxLeads       Int      @default(100)
+  maxMessagesDay Int      @default(50)
+  priceMonthly   Int      @default(0) // cents
+  features       Json?    @default("[]")
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id           String    @id @default(cuid())
+  workspaceId  String    @unique
+  planId       String
+  status       String    @default("active") // active | past_due | cancelled | trial
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  stripeSubscriptionId String?
+  stripeCustomerId    String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  plan      Plan      @relation(fields: [planId], references: [id])
 }
