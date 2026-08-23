@@ -8,10 +8,12 @@ import { requireWorkspace } from "@/lib/app";
 import { resolveTemplate } from "@/lib/extension";
 
 const stepSchema = z.object({
-  action: z.enum(["connect", "message", "follow_up", "reaction"]),
+  action: z.enum(["connect", "message", "follow_up", "reaction", "wait", "check_connection", "check_reply"]),
+  position: z.number().int().min(0).default(0),
   daysAfter: z.coerce.number().int().min(0).default(0),
   template: z.string().nullish(),
   variables: z.record(z.string(), z.any()).default({}),
+  attachments: z.array(z.any()).default([]),
 });
 
 const campaignSchema = z.object({
@@ -42,7 +44,7 @@ export async function createCampaign(prev: unknown, formData: FormData) {
     name: formData.get("name"),
     type: formData.get("type"),
     kind: formData.get("kind"),
-    linkedinAccountId: formData.get("linkedinAccountId") || null,
+    linkedinAccountId: (formData.get("linkedinAccountId") as string)?.trim() || null,
     dailyLimit: formData.get("dailyLimit"),
     minDelayMin: formData.get("minDelayMin"),
     maxDelayMin: formData.get("maxDelayMin"),
@@ -53,7 +55,7 @@ export async function createCampaign(prev: unknown, formData: FormData) {
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
 
-  const accountId = parsed.data.linkedinAccountId ?? null;
+  const accountId = (parsed.data.linkedinAccountId && parsed.data.linkedinAccountId.trim()) || null;
   if (accountId) {
     const account = await prisma.linkedinAccount.findFirst({
       where: { id: accountId, workspaceId: workspace.id },
@@ -76,7 +78,7 @@ export async function createCampaign(prev: unknown, formData: FormData) {
       aiPersonalization: parsed.data.aiPersonalization,
       steps: {
         create: parsed.data.steps.map((s, i) => ({
-          position: i,
+          position: s.position ?? i,
           action: s.action,
           daysAfter: s.daysAfter,
           template: s.template || null,

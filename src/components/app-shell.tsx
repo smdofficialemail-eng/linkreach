@@ -17,6 +17,7 @@ const NAV = [
       { href: "/app/accounts", label: "LinkedIn Accounts", icon: "◉" },
       { href: "/app/templates", label: "Templates", icon: "▭" },
       { href: "/app/analytics", label: "Analytics", icon: "◔" },
+      { href: "/app/automations", label: "Automations", icon: "⚡" },
     ],
   },
   {
